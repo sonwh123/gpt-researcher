@@ -429,6 +429,106 @@ Assume that the current date is {date.today()}.
 """
 
     @staticmethod
+    def generate_template_decomposition_prompt_sectioned(
+        template: str,
+        query: str,
+        leaf_headings: list[str],
+        context: str = "",
+    ) -> str:
+        """Sibling of ``generate_template_decomposition_prompt`` for report_type
+        "sub_template_isolated". Instead of one flat, untagged list of
+        sub-queries for the whole template, this asks for sub-queries tagged by
+        leaf heading (a Sub Section, or a bare Section with no Sub Sections),
+        one entry per heading in ``leaf_headings`` and in the same order - this
+        makes the LLM "fill in queries for these given headings" rather than
+        "invent heading strings", keeping downstream matching close to 1:1 by
+        construction. Does not affect ``generate_template_decomposition_prompt``.
+        """
+        context_block = (
+            f"\nBackground context (optional, for phrasing only):\n{context}\n"
+            if context
+            else ""
+        )
+        numbered_headings = "\n".join(
+            f"{i + 1}. {heading}" for i, heading in enumerate(leaf_headings)
+        )
+        return f"""You are a research planner. Given a report TEMPLATE (a table of contents with sections and sub-sections) and the user's overall TASK, decompose EACH of the leaf headings listed below into concrete search sub-queries.
+
+For EACH leaf heading, produce 1-3 self-contained search queries that, when answered, would provide the information needed to write that part of the report. Keep the queries specific and answerable via web/document search. Resolve any relative time or entity references (e.g. "this quarter", "the company") using the USER TASK.
+
+Follow this example exactly in spirit:
+
+--- EXAMPLE LEAF HEADINGS ---
+1. Sub Section 1.1: Revenue results, QoQ changes, YoY changes with reasons, revenue results vs. guidance from last quarter with reasons
+2. Sub Section 1.2: Wafer sales and the breakdown to wafer quantity and ASP for this quarter
+
+--- EXAMPLE DECOMPOSED SUB-QUERIES ---
+[
+  {{"heading": "Sub Section 1.1: Revenue results, QoQ changes, YoY changes with reasons, revenue results vs. guidance from last quarter with reasons", "queries": [
+    "What are the key revenue figures for this quarter, and how do they compare QoQ and YoY?",
+    "What factors contributed to the changes in revenue, and how did it align with previous guidance?",
+    "What are the management's explanations for revenue deviations and future expectations?"
+  ]}},
+  {{"heading": "Sub Section 1.2: Wafer sales and the breakdown to wafer quantity and ASP for this quarter", "queries": [
+    "What is the total wafer sales volume for this quarter, and how does it compare with previous periods?",
+    "How has the wafer ASP changed, and what are the underlying reasons for the variation?"
+  ]}}
+]
+
+Now decompose the following.
+
+--- USER TASK ---
+{query}
+{context_block}
+--- FULL TEMPLATE (for context on structure/order) ---
+{template}
+
+--- LEAF HEADINGS TO DECOMPOSE (respond with EXACTLY {len(leaf_headings)} objects, in THIS order) ---
+{numbered_headings}
+
+Respond with ONLY a JSON array of EXACTLY {len(leaf_headings)} objects, one per leaf heading above, in the same order, shaped as {{"heading": "<verbatim copy of the heading above>", "queries": ["q1", "q2"]}}. Copy each heading string exactly as given - do not paraphrase, translate, or reformat it."""
+
+    @staticmethod
+    def generate_sub_template_leaf_prompt(
+        question: str,
+        context,
+        heading: str,
+        report_source: str,
+        report_format="apa",
+        tone=None,
+        language="english",
+    ):
+        """Write ONE leaf unit (a Sub Section, or a bare Section with no Sub
+        Sections) of a "sub_template_isolated" report, using ONLY that leaf's
+        own isolated context.
+
+        Companion to ``generate_sub_template_report_prompt`` but scoped to a
+        single heading; the caller (the SubTemplateIsolated orchestrator)
+        prepends the "##"/"###" markdown header deterministically itself, so
+        this prompt explicitly instructs the LLM not to emit one, and not to
+        emit a separate reference list (leaf bodies get concatenated into one
+        report by the caller).
+        """
+        tone_prompt = f"Write the report in a {tone.value} tone." if tone else ""
+
+        return f"""
+Information: "{context}"
+---
+Overall report task: "{question}"
+You are writing ONLY the section titled: "{heading}"
+
+Please follow all of the following guidelines:
+- Write ONLY the body content for "{heading}", using ONLY the information given above. Do NOT write content that belongs to any other section - stay scoped to this one heading.
+- Do NOT include a markdown header/title line for "{heading}" - start directly with the body text; the header is added separately.
+- If the information above does not cover what this section asks for (including if it is empty), explicitly state that the information was not found for this section. Do NOT fabricate facts, figures, or citations.
+- You MUST write with markdown syntax and {report_format} format (e.g. paragraphs, and tables for structured/comparative data).
+- Use in-text citation references in {report_format} format as markdown hyperlinks placed at the end of the sentence or paragraph that references them like this: ([in-text citation](url)). Do NOT add a separate "References" list - this section will be concatenated with other sections into one report.
+- {tone_prompt}
+You MUST write in the following language: {language}.
+Assume that the current date is {date.today()}.
+"""
+
+    @staticmethod
     def curate_sources(query, sources, max_results=10):
         return f"""Your goal is to evaluate and curate the provided scraped content for the research task: "{query}"
     while prioritizing the inclusion of relevant and high-quality information, especially sources containing statistics, numbers, or concrete data.

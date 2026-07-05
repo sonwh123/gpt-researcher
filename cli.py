@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from dotenv import load_dotenv
 
-from backend.report_type import DetailedReport
+from backend.report_type import DetailedReport, SubTemplateIsolated
 from backend.utils import write_md_to_pdf, write_md_to_word
 from gpt_researcher import GPTResearcher
 from gpt_researcher.utils.enum import ReportSource, ReportType, Tone
@@ -59,6 +59,7 @@ report_type_descriptions = {
     ReportType.SubtopicReport.value: "",
     ReportType.DeepResearch.value: "Deep Research",
     ReportType.SubTemplate.value: "Template-driven report (requires --template_file)",
+    ReportType.SubTemplateIsolated.value: "Template-driven report with per-leaf isolated RAG (requires --template_file)",
 }
 
 cli.add_argument(
@@ -284,14 +285,33 @@ async def main(args):
     """
     query_domains = args.query_domains.split(",") if args.query_domains else []
 
-    # Load the report template when using the sub_template report type.
+    # Load the report template when using a template-driven report type.
     template = load_template(args.template_file) if args.template_file else None
-    if args.report_type == ReportType.SubTemplate.value and not template:
+    if args.report_type in (ReportType.SubTemplate.value, ReportType.SubTemplateIsolated.value) and not template:
         raise SystemExit(
-            "--report_type sub_template requires --template_file <path.txt|path.json>"
+            f"--report_type {args.report_type} requires --template_file <path.txt|path.json>"
         )
 
     researcher: GPTResearcher | None = None
+
+    # Convert the simple keyword to the full Tone enum value
+    tone_map = {
+        "objective": Tone.Objective,
+        "formal": Tone.Formal,
+        "analytical": Tone.Analytical,
+        "persuasive": Tone.Persuasive,
+        "informative": Tone.Informative,
+        "explanatory": Tone.Explanatory,
+        "descriptive": Tone.Descriptive,
+        "critical": Tone.Critical,
+        "comparative": Tone.Comparative,
+        "speculative": Tone.Speculative,
+        "reflective": Tone.Reflective,
+        "narrative": Tone.Narrative,
+        "humorous": Tone.Humorous,
+        "optimistic": Tone.Optimistic,
+        "pessimistic": Tone.Pessimistic
+    }
 
     if args.report_type == 'detailed_report':
         detailed_report = DetailedReport(
@@ -305,26 +325,19 @@ async def main(args):
         # DetailedReport owns an internal GPTResearcher; reuse it so we can
         # surface sources_count / total_cost and reuse the fast LLM for the title.
         researcher = getattr(detailed_report, "gpt_researcher", None)
-    else:
-        # Convert the simple keyword to the full Tone enum value
-        tone_map = {
-            "objective": Tone.Objective,
-            "formal": Tone.Formal,
-            "analytical": Tone.Analytical,
-            "persuasive": Tone.Persuasive,
-            "informative": Tone.Informative,
-            "explanatory": Tone.Explanatory,
-            "descriptive": Tone.Descriptive,
-            "critical": Tone.Critical,
-            "comparative": Tone.Comparative,
-            "speculative": Tone.Speculative,
-            "reflective": Tone.Reflective,
-            "narrative": Tone.Narrative,
-            "humorous": Tone.Humorous,
-            "optimistic": Tone.Optimistic,
-            "pessimistic": Tone.Pessimistic
-        }
+    elif args.report_type == ReportType.SubTemplateIsolated.value:
+        sub_template_isolated = SubTemplateIsolated(
+            query=args.query,
+            template=template,
+            query_domains=query_domains,
+            report_source=args.report_source,
+            tone=tone_map[args.tone],
+        )
 
+        report = await sub_template_isolated.run()
+        # Same reuse pattern as DetailedReport above.
+        researcher = getattr(sub_template_isolated, "gpt_researcher", None)
+    else:
         researcher = GPTResearcher(
             query=args.query,
             query_domains=query_domains,

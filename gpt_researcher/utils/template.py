@@ -35,6 +35,7 @@ consumes the normalized *text* outline, so both formats behave identically.
 
 import json
 import os
+import re
 from typing import Any
 
 
@@ -113,3 +114,83 @@ def load_template(path: str) -> str:
         return normalize_template(data)
 
     return raw.strip()
+
+
+_SECTION_RE = re.compile(r'^\s*Section\s+(\d+)\s*:\s*(.*)$', re.IGNORECASE)
+_SUBSECTION_RE = re.compile(r'^\s*Sub[\s_-]?Section\s+(\d+)\.(\d+)\s*:\s*(.*)$', re.IGNORECASE)
+
+
+def parse_template_outline(normalized_text: str) -> list[dict]:
+    """Parse the normalized ``Section N: ...`` / ``  Sub Section N.M: ...``
+    text outline (the same format both JSON- and TXT-origin templates are
+    reduced to, per ``normalize_template``/``load_template`` above) into a
+    nested structure, used by report_type "sub_template_isolated" to know
+    the deterministic order and nesting of leaf headings.
+
+    Grouping is based purely on line order (a "Section" line opens a new
+    section; every "Sub Section" line up to the next "Section" line belongs
+    to it) rather than cross-validating the "N.M" numeric prefix against the
+    parent's "N" - this keeps parsing robust to numbering typos.
+
+    Lines that match neither pattern (a title line, blank lines, free prose)
+    are ignored for structure purposes; the raw template text itself is
+    unaffected and still goes to prompts whole.
+
+    Returns, in document order:
+        [{"heading": "Section 1: ...", "subsections": [
+            {"heading": "Sub Section 1.1: ..."},
+            {"heading": "Sub Section 1.2: ..."},
+        ]},
+         {"heading": "Section 2: ...", "subsections": []}]
+
+    Returns [] if no "Section N:" line is found at all.
+    """
+    outline: list[dict] = []
+    current_section: dict | None = None
+
+    for line in normalized_text.splitlines():
+        section_match = _SECTION_RE.match(line)
+        if section_match:
+            current_section = {
+                "heading": line.strip(),
+                "subsections": [],
+            }
+            outline.append(current_section)
+            continue
+
+        subsection_match = _SUBSECTION_RE.match(line)
+        if subsection_match and current_section is not None:
+            current_section["subsections"].append({"heading": line.strip()})
+
+    return outline
+
+
+def get_leaf_nodes(outline: list[dict]) -> list[dict]:
+    """Flatten ``parse_template_outline()``'s nested structure into the
+    ordered list of independent research+write units ("leaves") used by
+    report_type "sub_template_isolated".
+
+    - A Section WITH subsections contributes each Sub Section as one leaf
+      (marker "###"); the Section itself is NOT a leaf - it's rendered as a
+      plain wrapper header with no independent content.
+    - A Section WITH NO subsections is itself one leaf (marker "##").
+
+    Each returned dict: {"heading": str, "marker": "##" | "###",
+    "parent_heading": str | None}. Order matches template order exactly.
+    """
+    leaves: list[dict] = []
+    for section in outline:
+        if section["subsections"]:
+            for sub in section["subsections"]:
+                leaves.append({
+                    "heading": sub["heading"],
+                    "marker": "###",
+                    "parent_heading": section["heading"],
+                })
+        else:
+            leaves.append({
+                "heading": section["heading"],
+                "marker": "##",
+                "parent_heading": None,
+            })
+    return leaves

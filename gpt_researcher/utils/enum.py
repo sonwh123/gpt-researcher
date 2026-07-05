@@ -20,6 +20,10 @@ class ReportType(Enum):
         SubTemplate: Template-driven report; a table-of-contents template is
             decomposed into per-section sub-queries and the final report is
             written to follow the template structure.
+        SubTemplateIsolated: Like SubTemplate, but each Sub Section (or bare
+            Section if it has no Sub Sections) is planned, searched, and
+            written as an independent unit instead of pooling all context
+            and writing the whole report in one shot.
     """
     ResearchReport = "research_report"
     ResourceReport = "resource_report"
@@ -29,6 +33,7 @@ class ReportType(Enum):
     SubtopicReport = "subtopic_report"
     DeepResearch = "deep"
     SubTemplate = "sub_template"
+    SubTemplateIsolated = "sub_template_isolated"
 
 
 class ReportSource(Enum):

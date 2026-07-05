@@ -345,12 +345,38 @@ class ResearchConductor:
                 sub_queries,
             )
 
-        # Using asyncio.gather to process the sub_queries asynchronously
+        # Using asyncio.gather (via _search_and_join) to process the sub_queries asynchronously
+        combined_context = await self._search_and_join(sub_queries, scraped_data, query_domains)
+        return combined_context if combined_context else []
+
+    async def _search_and_join(
+        self,
+        queries: list[str],
+        scraped_data: list | None = None,
+        query_domains: list | None = None,
+    ) -> str:
+        """Run ``_process_sub_query()`` for each query in parallel via
+        ``asyncio.gather``, filter out empty results, and join with a single
+        space. Returns ``""`` (not ``[]``) if nothing was found or an error
+        occurred.
+
+        Shared by:
+        - ``_get_context_by_web_search`` (the pooled path, incl. "sub_template"),
+          which translates the ``""`` sentinel back to ``[]`` at its call site
+          to preserve its existing return contract exactly.
+        - report_type "sub_template_isolated"'s orchestrator, which calls this
+          once per leaf unit and wants a plain empty string when nothing is
+          found.
+        """
+        if scraped_data is None:
+            scraped_data = []
+        if query_domains is None:
+            query_domains = []
         try:
             context = await asyncio.gather(
                 *[
-                    self._process_sub_query(sub_query, scraped_data, query_domains)
-                    for sub_query in sub_queries
+                    self._process_sub_query(q, scraped_data, query_domains)
+                    for q in queries
                 ]
             )
             self.logger.info(f"Gathered context from {len(context)} sub-queries")
@@ -360,10 +386,10 @@ class ResearchConductor:
                 combined_context = " ".join(context)
                 self.logger.info(f"Combined context size: {len(combined_context)}")
                 return combined_context
-            return []
+            return ""
         except Exception as e:
             self.logger.error(f"Error during web search: {e}", exc_info=True)
-            return []
+            return ""
 
     def _get_mcp_strategy(self) -> str:
         """

@@ -1,4 +1,5 @@
 import json_repair
+import re
 
 from gpt_researcher.llm_provider.generic.base import ReasoningEfforts
 from ..utils.llm import create_chat_completion
@@ -185,6 +186,123 @@ async def decompose_template_to_sub_queries(
     sub_queries = [str(q).strip() for q in sub_queries if str(q).strip()]
 
     return sub_queries
+
+
+def _normalize_heading(text: str) -> str:
+    """Whitespace-collapsed, casefolded form used for lenient heading matching."""
+    return re.sub(r"\s+", " ", str(text)).strip().casefold()
+
+
+async def decompose_template_to_sectioned_sub_queries(
+    query: str,
+    template: str,
+    leaf_headings: List[str],
+    search_results: List[Dict[str, Any]],
+    cfg: Config,
+    cost_callback: callable = None,
+    prompt_family: type[PromptFamily] | PromptFamily = PromptFamily,
+    **kwargs
+) -> List[Dict[str, Any]]:
+    """Decompose a report template into per-leaf-heading sub-queries, tagged by
+    heading, for report_type "sub_template_isolated".
+
+    Sibling of ``decompose_template_to_sub_queries`` (same LLM call + strategic
+    -> smart fallback pattern) but the LLM is asked to tag its output by the
+    given ``leaf_headings`` instead of returning one flat, untagged list.
+
+    Args:
+        query: The user's overall research task (supplies time/entity context).
+        template: The normalized text outline of the report template.
+        leaf_headings: The ordered list of leaf headings to decompose (from
+            ``gpt_researcher.utils.template.get_leaf_nodes``).
+        search_results: Initial search results (unused; kept for signature
+            symmetry with ``decompose_template_to_sub_queries``).
+        cfg: Configuration object.
+        cost_callback: Callback for cost calculation.
+        prompt_family: Family of prompts.
+
+    Returns:
+        Exactly ``len(leaf_headings)`` entries, always in ``leaf_headings``'
+        order, each ``{"heading": <the given heading string>, "queries": [...]}``.
+        Never raises: if the LLM response can't be matched to a given heading,
+        that heading gets ``queries: []`` and a warning is logged.
+    """
+    decomposition_prompt = prompt_family.generate_template_decomposition_prompt_sectioned(
+        template,
+        query,
+        leaf_headings,
+        context="",
+    )
+
+    try:
+        response = await create_chat_completion(
+            model=cfg.strategic_llm_model,
+            messages=[{"role": "user", "content": decomposition_prompt}],
+            llm_provider=cfg.strategic_llm_provider,
+            max_tokens=None,
+            llm_kwargs=cfg.llm_kwargs,
+            reasoning_effort=ReasoningEfforts.Medium.value,
+            cost_callback=cost_callback,
+            **kwargs
+        )
+    except Exception as e:
+        logger.warning(
+            f"Error with strategic LLM during sectioned template decomposition: {e}. "
+            f"Falling back to smart LLM."
+        )
+        response = await create_chat_completion(
+            model=cfg.smart_llm_model,
+            messages=[{"role": "user", "content": decomposition_prompt}],
+            temperature=cfg.temperature,
+            max_tokens=cfg.smart_token_limit,
+            llm_provider=cfg.smart_llm_provider,
+            llm_kwargs=cfg.llm_kwargs,
+            cost_callback=cost_callback,
+            **kwargs
+        )
+
+    parsed = json_repair.loads(response)
+    if not isinstance(parsed, list):
+        parsed = [parsed]
+
+    # Defensively normalize each parsed entry to {"heading": str, "queries": [str, ...]}.
+    parsed_entries: List[Dict[str, Any]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        heading = str(item.get("heading", "")).strip()
+        raw_queries = item.get("queries", [])
+        queries = (
+            [str(q).strip() for q in raw_queries if str(q).strip()]
+            if isinstance(raw_queries, list)
+            else []
+        )
+        parsed_entries.append({"heading": heading, "queries": queries})
+
+    # Match parsed entries back to leaf_headings: exact -> normalized -> positional -> empty.
+    by_exact = {entry["heading"]: entry["queries"] for entry in parsed_entries}
+    by_normalized = {
+        _normalize_heading(entry["heading"]): entry["queries"] for entry in parsed_entries
+    }
+    positional_fallback = len(parsed_entries) == len(leaf_headings)
+
+    result: List[Dict[str, Any]] = []
+    for i, heading in enumerate(leaf_headings):
+        if heading in by_exact:
+            queries = by_exact[heading]
+        elif _normalize_heading(heading) in by_normalized:
+            queries = by_normalized[_normalize_heading(heading)]
+        elif positional_fallback:
+            queries = parsed_entries[i]["queries"]
+        else:
+            queries = []
+            logger.warning(
+                f"Could not match a decomposed sub-query group to leaf heading "
+                f"'{heading}'; writing this leaf with no sub-queries."
+            )
+        result.append({"heading": heading, "queries": queries})
+
+    return result
 
 
 async def plan_research_outline(
