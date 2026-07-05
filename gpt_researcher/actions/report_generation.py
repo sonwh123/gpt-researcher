@@ -220,6 +220,7 @@ async def generate_report(
     relevant_written_contents: list = [],
     cost_callback: callable = None,
     custom_prompt: str = "", # This can be any prompt the user chooses with the context
+    template: str = "",  # Table-of-contents template for report_type "sub_template"
     headers=None,
     prompt_family: type[PromptFamily] | PromptFamily = PromptFamily,
     available_images: list = None,
@@ -252,6 +253,8 @@ async def generate_report(
 
     if report_type == "subtopic_report":
         content = f"{generate_prompt(query, existing_headers, relevant_written_contents, main_topic, context, report_format=cfg.report_format, tone=tone, total_words=cfg.total_words, language=cfg.language)}"
+    elif report_type == "sub_template" and template:
+        content = f"{generate_prompt(query, context, template, report_source, report_format=cfg.report_format, tone=tone, total_words=cfg.total_words, language=cfg.language)}"
     elif custom_prompt:
         content = f"{custom_prompt}\n\nContext: {context}"
     else:

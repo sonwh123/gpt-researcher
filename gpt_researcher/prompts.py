@@ -312,6 +312,123 @@ Assume that the current date is {date.today()}.
 """
 
     @staticmethod
+    def generate_template_decomposition_prompt(
+        template: str,
+        query: str,
+        context: str = "",
+    ) -> str:
+        """Decompose a table-of-contents template into per-section sub-queries.
+
+        Implements the DecomposedIR idea (arxiv 2504.14233): each (sub)section of
+        the template is reframed as one or more answerable search queries. A
+        one-shot example (paper Figure 1 -> Figure 3) guides the output shape.
+
+        Args:
+            template: The normalized text outline of the report template.
+            query: The user's overall research task (supplies time/entity context).
+            context: Optional background text (e.g. initial search snippets).
+
+        Returns:
+            The prompt string. The LLM is expected to return a flat JSON array of
+            query strings, in the template's section order.
+        """
+        context_block = (
+            f"\nBackground context (optional, for phrasing only):\n{context}\n"
+            if context
+            else ""
+        )
+        return f"""You are a research planner. Given a report TEMPLATE (a table of contents with sections and sub-sections) and the user's overall TASK, decompose the template into concrete search sub-queries.
+
+For EACH section / sub-section of the template, produce 1-3 self-contained search queries that, when answered, would provide the information needed to write that part of the report. Keep the queries specific and answerable via web/document search. Resolve any relative time or entity references (e.g. "this quarter", "the company") using the USER TASK.
+
+Follow this example exactly in spirit:
+
+--- EXAMPLE TEMPLATE ---
+Section 1: P&L highlights result
+  Sub Section 1.1: Revenue results, QoQ changes, YoY changes with reasons, revenue results vs. guidance from last quarter with reasons
+  Sub Section 1.2: Wafer sales and the breakdown to wafer quantity and ASP for this quarter
+
+--- EXAMPLE DECOMPOSED SUB-QUERIES ---
+[
+  "What are the key revenue figures for this quarter, and how do they compare QoQ and YoY?",
+  "What factors contributed to the changes in revenue, and how did it align with previous guidance?",
+  "What are the management's explanations for revenue deviations and future expectations?",
+  "What is the total wafer sales volume for this quarter, and how does it compare with previous periods?",
+  "How has the wafer ASP changed, and what are the underlying reasons for the variation?",
+  "What trends can be observed in wafer demand across different customer segments?"
+]
+
+Now decompose the following.
+
+--- USER TASK ---
+{query}
+{context_block}
+--- TEMPLATE ---
+{template}
+
+Respond with ONLY a JSON array of query strings (a flat list, no section labels, no extra keys). Preserve the template's section order."""
+
+    @staticmethod
+    def generate_sub_template_report_prompt(
+        question: str,
+        context,
+        template: str,
+        report_source: str,
+        report_format="apa",
+        tone=None,
+        total_words=1000,
+        language="english",
+    ):
+        """Generate a report that strictly follows the given template structure.
+
+        Based on ``generate_report_prompt`` but the template's sections/sub-sections
+        become the report's headers, and each is filled from the researched context.
+        """
+        reference_prompt = ""
+        if report_source == ReportSource.Web.value:
+            reference_prompt = f"""
+You MUST write all used source urls at the end of the report as references, and make sure to not add duplicated sources, but only one reference for each.
+Every url should be hyperlinked: [url website](url)
+Additionally, you MUST include hyperlinks to the relevant URLs wherever they are referenced in the report:
+
+eg: Author, A. A. (Year, Month Date). Title of web page. Website Name. [url website](url)
+"""
+        else:
+            reference_prompt = f"""
+You MUST write all used source document names at the end of the report as references, and make sure to not add duplicated sources, but only one reference for each."
+"""
+
+        tone_prompt = f"Write the report in a {tone.value} tone." if tone else ""
+
+        return f"""
+Information: "{context}"
+---
+Task: "{question}"
+
+You MUST write a report that STRICTLY follows the structure of the template below. Treat the template as the report's table of contents:
+- Every Section becomes a markdown header and every Sub Section a markdown sub-header, using the template's headings verbatim and in the template's order (## for sections, ### for sub-sections).
+- Fill each section/sub-section using ONLY the information above; answer what each section asks for.
+- If the information does not cover a section, explicitly state that the information was not found for that section. Do NOT fabricate facts, figures, or citations.
+
+--- REPORT TEMPLATE ---
+{template}
+--- END TEMPLATE ---
+
+Please follow all of the following guidelines in your report:
+- You MUST write the report with markdown syntax and {report_format} format.
+- Use the template headings verbatim as the section/sub-section headers; you may add a single H1 (#) report title at the very top.
+- Use markdown tables when presenting structured data or comparisons to enhance readability.
+- Base every statement strictly on the given information, prioritizing facts and numbers where available.
+- Use in-text citation references in {report_format} format as markdown hyperlinks placed at the end of the sentence or paragraph that references them like this: ([in-text citation](url)).
+- Don't forget to add a reference list at the end of the report in {report_format} format and full url links without hyperlinks.
+- {reference_prompt}
+- {tone_prompt}
+The report should be detailed and aim for at least {total_words} words where the available information allows.
+You MUST write the report in the following language: {language}.
+Assume that the current date is {date.today()}.
+"""
+
+    @staticmethod
     def curate_sources(query, sources, max_results=10):
         return f"""Your goal is to evaluate and curate the provided scraped content for the research task: "{query}"
     while prioritizing the inclusion of relevant and high-quality information, especially sources containing statistics, numbers, or concrete data.
@@ -852,6 +969,7 @@ report_type_mapping = {
     ReportType.CustomReport.value: "generate_custom_report_prompt",
     ReportType.SubtopicReport.value: "generate_subtopic_report_prompt",
     ReportType.DeepResearch.value: "generate_deep_research_prompt",
+    ReportType.SubTemplate.value: "generate_sub_template_report_prompt",
 }
 
 

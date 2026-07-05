@@ -17,6 +17,9 @@ class ReportType(Enum):
         DetailedReport: In-depth detailed analysis report.
         SubtopicReport: Report focused on a specific subtopic.
         DeepResearch: Deep research mode with extensive analysis.
+        SubTemplate: Template-driven report; a table-of-contents template is
+            decomposed into per-section sub-queries and the final report is
+            written to follow the template structure.
     """
     ResearchReport = "research_report"
     ResourceReport = "resource_report"
@@ -25,6 +28,7 @@ class ReportType(Enum):
     DetailedReport = "detailed_report"
     SubtopicReport = "subtopic_report"
     DeepResearch = "deep"
+    SubTemplate = "sub_template"
 
 
 class ReportSource(Enum):

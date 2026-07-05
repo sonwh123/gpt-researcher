@@ -1,0 +1,6 @@
+Section 1: P&L highlights result
+  Sub Section 1.1: Revenue results, QoQ changes, YoY changes with reasons, revenue results vs. guidance from last quarter with reasons
+  Sub Section 1.2: Wafer sales and the breakdown to wafer quantity and ASP for this quarter
+Section 2: Segment or Platform highlights
+  Sub Section 2.1: Sales by segment or platforms, their respective margin levels, and their respective management comments
+  Sub Section 2.2: Sales guidance, forecast, or trend by segment for next quarter or full year

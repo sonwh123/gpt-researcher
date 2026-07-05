@@ -1,0 +1,19 @@
+{
+  "title": "Quarterly Financial Report",
+  "sections": [
+    {
+      "heading": "P&L highlights result",
+      "subsections": [
+        "Revenue results, QoQ/YoY changes with reasons vs. prior guidance",
+        "Wafer sales and the breakdown to wafer quantity and ASP"
+      ]
+    },
+    {
+      "heading": "Segment or Platform highlights",
+      "subsections": [
+        "Sales by segment/platform, margin levels, and management comments",
+        "Sales guidance/forecast/trend by segment for next quarter or full year"
+      ]
+    }
+  ]
+}

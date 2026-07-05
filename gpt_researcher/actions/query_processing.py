@@ -3,6 +3,7 @@ import json_repair
 from gpt_researcher.llm_provider.generic.base import ReasoningEfforts
 from ..utils.llm import create_chat_completion
 from ..prompts import PromptFamily
+from ..utils.enum import ReportType
 from typing import Any, List, Dict
 from ..config import Config
 import logging
@@ -109,6 +110,83 @@ async def generate_sub_queries(
 
     return json_repair.loads(response)
 
+
+async def decompose_template_to_sub_queries(
+    query: str,
+    template: str,
+    search_results: List[Dict[str, Any]],
+    cfg: Config,
+    cost_callback: callable = None,
+    prompt_family: type[PromptFamily] | PromptFamily = PromptFamily,
+    **kwargs
+) -> List[str]:
+    """Decompose a report template into per-section sub-queries (DecomposedIR).
+
+    Mirrors ``generate_sub_queries`` (LLM call + fallback) but uses the
+    template-decomposition prompt instead of the generic search-query prompt.
+
+    Args:
+        query: The user's overall research task (supplies time/entity context).
+        template: The normalized text outline of the report template.
+        search_results: Initial search results (unused; kept for signature symmetry).
+        cfg: Configuration object.
+        cost_callback: Callback for cost calculation.
+        prompt_family: Family of prompts.
+
+    Returns:
+        A flat list of sub-queries in the template's section order.
+    """
+    decomposition_prompt = prompt_family.generate_template_decomposition_prompt(
+        template,
+        query,
+        context="",
+    )
+
+    try:
+        response = await create_chat_completion(
+            model=cfg.strategic_llm_model,
+            messages=[{"role": "user", "content": decomposition_prompt}],
+            llm_provider=cfg.strategic_llm_provider,
+            max_tokens=None,
+            llm_kwargs=cfg.llm_kwargs,
+            reasoning_effort=ReasoningEfforts.Medium.value,
+            cost_callback=cost_callback,
+            **kwargs
+        )
+    except Exception as e:
+        logger.warning(
+            f"Error with strategic LLM during template decomposition: {e}. "
+            f"Falling back to smart LLM."
+        )
+        response = await create_chat_completion(
+            model=cfg.smart_llm_model,
+            messages=[{"role": "user", "content": decomposition_prompt}],
+            temperature=cfg.temperature,
+            max_tokens=cfg.smart_token_limit,
+            llm_provider=cfg.smart_llm_provider,
+            llm_kwargs=cfg.llm_kwargs,
+            cost_callback=cost_callback,
+            **kwargs
+        )
+
+    sub_queries = json_repair.loads(response)
+
+    # Be defensive: normalize to a flat list of non-empty query strings.
+    if isinstance(sub_queries, dict):
+        flattened: List[str] = []
+        for value in sub_queries.values():
+            if isinstance(value, list):
+                flattened.extend(str(v) for v in value)
+            else:
+                flattened.append(str(value))
+        sub_queries = flattened
+    if not isinstance(sub_queries, list):
+        sub_queries = [str(sub_queries)]
+    sub_queries = [str(q).strip() for q in sub_queries if str(q).strip()]
+
+    return sub_queries
+
+
 async def plan_research_outline(
     query: str,
     search_results: List[Dict[str, Any]],
@@ -118,6 +196,7 @@ async def plan_research_outline(
     report_type: str,
     cost_callback: callable = None,
     retriever_names: List[str] = None,
+    template: str = None,
     **kwargs
 ) -> List[str]:
     """
@@ -154,6 +233,18 @@ async def plan_research_outline(
         else:
             # If MCP is one of multiple retrievers, generate sub-queries for the others
             logger.info("Using MCP with other retrievers - generating sub-queries for non-MCP retrievers")
+
+    # sub_template report type: decompose the template into per-section sub-queries
+    if report_type == ReportType.SubTemplate.value and template:
+        logger.info("sub_template report - decomposing template into sub-queries")
+        return await decompose_template_to_sub_queries(
+            query,
+            template,
+            search_results,
+            cfg,
+            cost_callback,
+            **kwargs
+        )
 
     # Generate sub-queries for research outline
     sub_queries = await generate_sub_queries(

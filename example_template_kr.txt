@@ -1,0 +1,12 @@
+Section 1: 실적 개요
+  Sub Section 1.1: 해당 분기 매출·영업이익·순이익 실적과 전분기(QoQ)·전년동기(YoY) 대비 증감
+  Sub Section 1.2: 시장 컨센서스(가이던스) 대비 실적 부합 여부와 그 원인
+Section 2: 사업 부문별 성과
+  Sub Section 2.1: 주요 사업 부문별 매출 비중과 부문별 영업이익률
+  Sub Section 2.2: 부문별 성장/부진 요인과 경영진 코멘트
+Section 3: 재무 건전성
+  Sub Section 3.1: 현금흐름, 부채비율, 유동성 등 재무 지표 현황
+  Sub Section 3.2: 자본 배분 정책(배당·자사주 매입·설비투자) 동향
+Section 4: 향후 전망
+  Sub Section 4.1: 다음 분기 및 연간 실적 가이던스
+  Sub Section 4.2: 주요 리스크 요인과 성장 동력

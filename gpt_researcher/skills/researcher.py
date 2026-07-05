@@ -81,6 +81,7 @@ class ResearchConductor:
             report_type=self.researcher.report_type,
             cost_callback=self.researcher.add_costs,
             retriever_names=retriever_names,  # Pass retriever names for MCP optimization
+            template=self.researcher.template,  # Used by report_type "sub_template"
             **self.researcher.kwargs
         )
         self.logger.info(f"Research outline planned: {outline}")

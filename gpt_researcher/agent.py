@@ -79,6 +79,7 @@ class GPTResearcher:
         mcp_configs: list[dict] | None = None,
         mcp_max_iterations: int | None = None,
         mcp_strategy: str | None = None,
+        template: str | None = None,
         **kwargs
     ):
         """
@@ -131,12 +132,18 @@ class GPTResearcher:
                 ```
             mcp_strategy (str, optional): MCP execution strategy. Options:
                 - "fast" (default): Run MCP once with original query for best performance
-                - "deep": Run MCP for all sub-queries for maximum thoroughness  
+                - "deep": Run MCP for all sub-queries for maximum thoroughness
                 - "disabled": Skip MCP entirely, use only web retrievers
+            template (str, optional): Table-of-contents report template. Only used
+                when report_type is "sub_template": the Planner decomposes it into
+                per-section sub-queries and the Publisher writes the report to
+                follow its structure. Load from a file with
+                gpt_researcher.utils.template.load_template.
         """
         self.kwargs = kwargs
         self.query = query
         self.report_type = report_type
+        self.template = template  # Report template (used by report_type "sub_template")
         self.cfg = Config(config_path)
         self.cfg.set_verbose(verbose)
         self.report_source = report_source if report_source else getattr(self.cfg, 'report_source', None)

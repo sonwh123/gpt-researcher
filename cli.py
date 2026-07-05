@@ -23,6 +23,7 @@ from backend.utils import write_md_to_pdf, write_md_to_word
 from gpt_researcher import GPTResearcher
 from gpt_researcher.utils.enum import ReportSource, ReportType, Tone
 from gpt_researcher.utils.llm import create_chat_completion
+from gpt_researcher.utils.template import load_template
 
 # =============================================================================
 # CLI
@@ -56,7 +57,8 @@ report_type_descriptions = {
     ReportType.OutlineReport.value: "",
     ReportType.CustomReport.value: "",
     ReportType.SubtopicReport.value: "",
-    ReportType.DeepResearch.value: "Deep Research"
+    ReportType.DeepResearch.value: "Deep Research",
+    ReportType.SubTemplate.value: "Template-driven report (requires --template_file)",
 }
 
 cli.add_argument(
@@ -116,6 +118,19 @@ cli.add_argument(
     choices=["web", "local", "hybrid", "azure", "langchain_documents",
              "langchain_vectorstore", "static"],
     default="web"
+)
+
+# =====================================
+# Arg: Template File (for report_type sub_template)
+# =====================================
+
+cli.add_argument(
+    "--template_file",
+    type=str,
+    help="Path to a report template file (.txt or .json). Required for "
+         "--report_type sub_template: the template's sections are decomposed "
+         "into sub-queries and the report follows the template structure.",
+    default=""
 )
 
 # =====================================
@@ -269,6 +284,13 @@ async def main(args):
     """
     query_domains = args.query_domains.split(",") if args.query_domains else []
 
+    # Load the report template when using the sub_template report type.
+    template = load_template(args.template_file) if args.template_file else None
+    if args.report_type == ReportType.SubTemplate.value and not template:
+        raise SystemExit(
+            "--report_type sub_template requires --template_file <path.txt|path.json>"
+        )
+
     researcher: GPTResearcher | None = None
 
     if args.report_type == 'detailed_report':
@@ -309,7 +331,8 @@ async def main(args):
             report_type=args.report_type,
             report_source=args.report_source,
             tone=tone_map[args.tone],
-            encoding=args.encoding
+            encoding=args.encoding,
+            template=template,
         )
 
         await researcher.conduct_research()
