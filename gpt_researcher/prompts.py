@@ -454,7 +454,7 @@ Assume that the current date is {date.today()}.
         )
         return f"""You are a research planner. Given a report TEMPLATE (a table of contents with sections and sub-sections) and the user's overall TASK, decompose EACH of the leaf headings listed below into concrete search sub-queries.
 
-For EACH leaf heading, produce 1-3 self-contained search queries that, when answered, would provide the information needed to write that part of the report. Keep the queries specific and answerable via web/document search. Resolve any relative time or entity references (e.g. "this quarter", "the company") using the USER TASK.
+For EACH leaf heading, produce 1-3 self-contained search queries that, when answered, would provide the information needed to write that part of the report. Keep the queries specific and answerable via web/document search. Resolve any relative time or entity references (e.g. "this quarter", "the company") using the USER TASK, and literally include the specific reporting period (e.g. exact quarter/year) and entity name from the USER TASK in every query - do not rely on vague phrasing that could also match a different period.
 
 Follow this example exactly in spirit:
 

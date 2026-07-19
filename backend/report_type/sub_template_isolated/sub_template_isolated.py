@@ -8,6 +8,7 @@ from fastapi import WebSocket
 from gpt_researcher import GPTResearcher
 from gpt_researcher.actions import choose_agent
 from gpt_researcher.actions.query_processing import decompose_template_to_sectioned_sub_queries
+from gpt_researcher.actions.utils import stream_output
 from gpt_researcher.utils.enum import ReportType
 from gpt_researcher.utils.llm import create_chat_completion
 from gpt_researcher.utils.template import get_leaf_nodes, parse_template_outline
@@ -127,6 +128,18 @@ class SubTemplateIsolated:
             cost_callback=gr.add_costs,
             prompt_family=gr.prompt_family,
         )
+
+        if gr.verbose:
+            for item in sectioned:
+                await stream_output(
+                    "logs",
+                    "subqueries",
+                    f"🗂️ [{item['heading']}] queries: {item['queries']}",
+                    gr.websocket,
+                    True,
+                    item["queries"],
+                )
+
         return {item["heading"]: item["queries"] for item in sectioned}
 
     async def _process_all_leaves(self, leaf_query_map: Dict[str, List[str]]) -> Dict[str, str]:
@@ -138,7 +151,29 @@ class SubTemplateIsolated:
         pairs = await asyncio.gather(*(_one(leaf) for leaf in self.leaf_nodes))
         return dict(pairs)
 
-    async def _process_leaf(self, leaf: Dict, queries: List[str]) -> str:
+    # Substrings the model has been observed to use (in the leaf-write prompt's
+    # target language) when it states that no information was found for a
+    # section. Asking the model to emit a fixed sentinel token instead was
+    # tried and found unreliable (it kept writing its own natural-language
+    # phrasing regardless), so detection is done by matching these instead.
+    _NO_INFO_PHRASES = [
+        "정보가 제공되지 않아",
+        "정보가 발견되지 않",
+        "정보를 찾을 수 없",
+        "정보는 찾을 수 없",
+        "정보가 없어",
+        "information was not found",
+        "no information",
+        "could not find",
+        "unable to find",
+    ]
+
+    @classmethod
+    def _looks_like_no_info(cls, body: str) -> bool:
+        return any(phrase in body for phrase in cls._NO_INFO_PHRASES)
+
+    async def _search_and_write_leaf(self, leaf: Dict, queries: List[str]) -> str:
+        """Search (if there are queries) and write the body for one leaf."""
         gr = self.gpt_researcher
         if queries:
             context = await gr.research_conductor._search_and_join(
@@ -181,6 +216,37 @@ class SubTemplateIsolated:
                 llm_kwargs=gr.cfg.llm_kwargs,
                 cost_callback=gr.add_costs,
             )
+
+    async def _process_leaf(self, leaf: Dict, queries: List[str]) -> str:
+        gr = self.gpt_researcher
+        body = await self._search_and_write_leaf(leaf, queries)
+
+        if self._looks_like_no_info(body):
+            if gr.verbose:
+                await stream_output(
+                    "logs",
+                    "leaf_no_info_retry",
+                    f"⚠️ [{leaf['heading']}] no information found, retrying with a broadened query...",
+                    gr.websocket,
+                )
+            fallback_topic = leaf["heading"].split(":", 1)[-1].strip()
+            broadened_queries = queries + [f"{self.query} {fallback_topic}"]
+            body = await self._search_and_write_leaf(leaf, broadened_queries)
+
+            if gr.verbose:
+                recovered = not self._looks_like_no_info(body)
+                await stream_output(
+                    "logs",
+                    "leaf_retry_result",
+                    (
+                        f"✅ [{leaf['heading']}] recovered content on retry"
+                        if recovered
+                        else f"⚠️ [{leaf['heading']}] still no information after retry"
+                    ),
+                    gr.websocket,
+                )
+
+        return body
 
     def _assemble_report(self, leaf_blocks: Dict[str, str]) -> str:
         parts: List[str] = []
